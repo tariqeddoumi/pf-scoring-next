@@ -24,7 +24,7 @@ export default function Clients(){
     <div className="space-y-4">
       <h1 className="text-xl font-semibold">Clients</h1>
       <div className="flex gap-2">
-        <input value={label} onChange={e=>setLabel(e.target.value)} placeholder="Intitulé client" className="border px-2 py-1 rounded w-80"/>
+        <input value={label} onChange={e=>setLabel(e.target.value)} placeholder="Intitulé cliehnt" className="border px-2 py-1 rounded w-80"/>
         <button onClick={create} className="px-3 py-1 bg-black text-white rounded">Créer</button>
       </div>
       <table className="w-full border bg-white">
