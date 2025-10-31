@@ -12,12 +12,14 @@ export default function Projects(){
       .then(({data})=> setRows(data||[]))
   },[])
 
-  const create = async ()=>{
-    const id = crypto.randomUUID().replace(/-/g,"").slice(0,15).toUpperCase()
-    await supabase.from("projects").insert({ project_id: id, project_name: name })
-    const { data } = await supabase.from("projects").select("project_id,project_name,sector")
-    setRows(data||[]); setName("")
-  }
+const create = async ()=>{
+  const id = crypto.randomUUID().replace(/-/g,'').slice(0,15).toUpperCase()
+  const { error } = await supabase.from('projects').insert({ project_id: id, project_name: name })
+  if (error) { alert('Erreur insert projects: ' + error.message); console.error(error); return }
+  const { data, error: selErr } = await supabase.from('projects').select('project_id,project_name,sector')
+  if (selErr) { alert('Erreur select projects: ' + selErr.message); console.error(selErr); return }
+  setRows(data||[]); setName('')
+}
 
   return (
     <div className="space-y-4">
@@ -41,3 +43,4 @@ export default function Projects(){
     </div>
   )
 }
+
