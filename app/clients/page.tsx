@@ -13,12 +13,19 @@ export default function Clients(){
       .then(({data})=> setRows(data||[]))
   },[])
 
-  const create = async ()=>{
-    const code = crypto.randomUUID().slice(0,7).replace(/-/g,"A").toUpperCase()
-    await supabase.from("clients").insert({ client_code: code, label })
-    const { data } = await supabase.from("clients").select("client_code,label,customer_type,market_size")
-    setRows(data||[]); setLabel("")
+const create = async ()=>{
+  const code = crypto.randomUUID().slice(0,7).replace(/-/g,'A').toUpperCase()
+  const { error } = await supabase.from('clients').insert({ client_code: code, label })
+  if (error) {
+    alert('Erreur insert clients: ' + error.message)
+    console.error(error)
+    return
   }
+  const { data, error: selErr } = await supabase.from('clients')
+    .select('client_code,label,customer_type,market_size')
+  if (selErr) { alert('Erreur select clients: ' + selErr.message); console.error(selErr); return }
+  setRows(data||[]); setLabel('')
+}
 
   return (
     <div className="space-y-4">
