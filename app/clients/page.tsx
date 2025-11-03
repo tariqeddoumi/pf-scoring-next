@@ -1,52 +1,50 @@
-﻿"use client"
-import { useEffect, useState } from "react"
-import { supabase } from "@/lib/supabaseClient"
-
-type Client = { client_code:string; label:string; customer_type:string|null; market_size:string|null }
+﻿// ...imports
+type Client = {
+  client_code:string; bank_code:string|null; bank_name:string|null;
+  branch_code:string|null; branch_name:string|null;
+  group_code:string|null; group_name:string|null;
+  label:string; customer_type:string|null; market_size:string|null;
+  identifiers:any; sector_code:string|null; legal_form:string|null; hq_address:string|null
+}
 
 export default function Clients(){
-  const [rows, setRows] = useState<Client[]>([])
-  const [label, setLabel] = useState("")
+  // champs
+  const [form, setForm] = useState<Partial<Client>>({ identifiers: {} })
+  const set = (k:string, v:any)=> setForm(s=>({...s,[k]:v}))
 
-  useEffect(()=>{
-    supabase.from("clients").select("client_code,label,customer_type,market_size")
-      .then(({data})=> setRows(data||[]))
-  },[])
-
-const create = async ()=>{
-  const code = crypto.randomUUID().slice(0,7).replace(/-/g,'A').toUpperCase()
-  const { error } = await supabase.from('clients').insert({ client_code: code, label })
-  if (error) {
-    alert('Erreur insert clients: ' + error.message)
-    console.error(error)
-    return
+  const create = async ()=>{
+    const code = crypto.randomUUID().replace(/-/g,'').slice(0,7).toUpperCase()
+    const payload = { client_code: code, ...form }
+    const { error } = await supabase.from('clients').insert(payload)
+    if (error) { alert('Erreur: '+error.message); return }
+    alert('Client créé: '+code); location.reload()
   }
-  const { data, error: selErr } = await supabase.from('clients')
-    .select('client_code,label,customer_type,market_size')
-  if (selErr) { alert('Erreur select clients: ' + selErr.message); console.error(selErr); return }
-  setRows(data||[]); setLabel('')
-}
 
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-semibold">Clients</h1>
-      <div className="flex gap-2">
-        <input value={label} onChange={e=>setLabel(e.target.value)} placeholder="Intitulé cliehnt" className="border px-2 py-1 rounded w-80"/>
-        <button onClick={create} className="px-3 py-1 bg-black text-white rounded">Créer</button>
+
+      <div className="grid grid-cols-2 gap-3 bg-white p-4 rounded border">
+        <input className="border px-2 py-1 rounded" placeholder="Intitulé client" onChange={e=>set('label', e.target.value)} />
+        <input className="border px-2 py-1 rounded" placeholder="Type client" onChange={e=>set('customer_type', e.target.value)} />
+        <input className="border px-2 py-1 rounded" placeholder="Taille/Marché (TPE/PME/GE)" onChange={e=>set('market_size', e.target.value)} />
+        <input className="border px-2 py-1 rounded" placeholder="Secteur (NMA/NACE)" onChange={e=>set('sector_code', e.target.value)} />
+        <input className="border px-2 py-1 rounded" placeholder="Forme juridique" onChange={e=>set('legal_form', e.target.value)} />
+        <input className="border px-2 py-1 rounded" placeholder="Adresse siège" onChange={e=>set('hq_address', e.target.value)} />
+
+        <input className="border px-2 py-1 rounded" placeholder="Code banque" onChange={e=>set('bank_code', e.target.value)} />
+        <input className="border px-2 py-1 rounded" placeholder="Nom banque" onChange={e=>set('bank_name', e.target.value)} />
+        <input className="border px-2 py-1 rounded" placeholder="Code agence" onChange={e=>set('branch_code', e.target.value)} />
+        <input className="border px-2 py-1 rounded" placeholder="Nom agence" onChange={e=>set('branch_name', e.target.value)} />
+        <input className="border px-2 py-1 rounded" placeholder="Code groupe d'affaires" onChange={e=>set('group_code', e.target.value)} />
+        <input className="border px-2 py-1 rounded" placeholder="Nom groupe d'affaires" onChange={e=>set('group_name', e.target.value)} />
+
+        <input className="border px-2 py-1 rounded" placeholder="ICE" onChange={e=>set('identifiers', {...form.identifiers, ICE: e.target.value})} />
+        <input className="border px-2 py-1 rounded" placeholder="IS" onChange={e=>set('identifiers', {...form.identifiers, IS: e.target.value})} />
+        <input className="border px-2 py-1 rounded" placeholder="RC" onChange={e=>set('identifiers', {...form.identifiers, RC: e.target.value})} />
       </div>
-      <table className="w-full border bg-white">
-        <thead><tr className="text-left bg-gray-100"><th className="p-2">Code</th><th>Label</th><th>Type</th><th>Taille</th></tr></thead>
-        <tbody>
-          {rows.map(r=>(
-            <tr key={r.client_code} className="border-t">
-              <td className="p-2">{r.client_code}</td>
-              <td className="p-2">{r.label}</td>
-              <td className="p-2">{r.customer_type||"-"}</td>
-              <td className="p-2">{r.market_size||"-"}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+
+      <button onClick={create} className="px-4 py-2 rounded bg-black text-white">Créer</button>
     </div>
   )
 }

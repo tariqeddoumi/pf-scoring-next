@@ -1,15 +1,22 @@
-﻿"use client"
-import { supabase } from "@/lib/supabaseClient"
+﻿// components/Nav.tsx (ajoute ce bloc)
+"use client"
+import { useEffect, useState } from 'react'
+import { supabase } from '@/lib/supabaseClient'
 
-export default function Login(){
-  const signin = async (provider: "google"|"azure")=>{
-    await supabase.auth.signInWithOAuth({ provider: provider==="google"?"google":"azure" })
-  }
+export default function Nav(){
+  // ...
+  const [logged, setLogged] = useState(false)
+  useEffect(()=>{
+    supabase.auth.getSession().then(({data})=> setLogged(!!data.session))
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, s)=> setLogged(!!s))
+    return ()=> sub.subscription.unsubscribe()
+  },[])
+  const logout = async ()=> { await supabase.auth.signOut(); location.reload() }
+
   return (
-    <div className="space-y-4">
-      <h1 className="text-xl font-semibold">Connexion</h1>
-      <button onClick={()=>signin("google")} className="px-4 py-2 rounded bg-black text-white">Google</button>
-      <button onClick={()=>signin("azure")} className="px-4 py-2 rounded bg-gray-800 text-white">Microsoft</button>
-    </div>
+    <nav className="flex gap-2 p-3 border-b bg-white sticky top-0">
+      {/* liens existants */}
+      {logged && <button onClick={logout} className="ml-auto px-3 py-2 rounded bg-gray-800 text-white">Logout</button>}
+    </nav>
   )
 }
