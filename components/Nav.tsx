@@ -10,7 +10,7 @@ export default function Nav() {
     <Link
       href={href}
       className={
-        'px-3 py-2 rounded' +
+        'px-3 py-2 rounded ' +
         (pathname === href ? 'bg-black text-white' : 'hover:bg-gray-200')
       }
       >
@@ -28,6 +28,7 @@ export default function Nav() {
     </nav>
   )
 }
+
 
 
 
