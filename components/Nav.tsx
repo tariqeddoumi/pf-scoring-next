@@ -9,9 +9,9 @@ export default function Nav() {
   const link = (href: string, label: string) => (
     <Link
       href={href}
-      className={`px-3 py-2 rounded ${
-        pathname === href ? 'bg-black text-white' : 'hover:bg-gray-200'
-      }`}
+     className={
+  'px-3 py-2 rounded ' + (pathname === href ? 'bg-black text-white' : 'hover:bg-gray-200')
+}
     >
       {label}
     </Link>
@@ -27,3 +27,4 @@ export default function Nav() {
     </nav>
   )
 }
+
