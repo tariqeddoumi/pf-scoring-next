@@ -21,6 +21,7 @@ export default function Nav() {
   return (
     <nav className="flex gap-2 p-3 border-b bg-white sticky top-0">
       {link('/', 'Accueil')}
+      {link('/admin', 'Admin')}
       {link('/clients', 'Clients')}
       {link('/projects', 'Projets')}
       {link('/scoring/new', 'Scoring')}
