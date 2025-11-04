@@ -1,3 +1,6 @@
+<<<<<<< HEAD
+
+=======
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
@@ -11,8 +14,10 @@ export default function Nav(){
       {link('/', 'Accueil')}
       {link('/clients', 'Clients')}
       {link('/projects', 'Projets')}
-      {link('/scoring', 'Scoring')}
+      {link('/scoring/new', 'Scoring')}
       {link('/login', 'Login')}
     </nav>
   )
 }
+
+>>>>>>> 48a2057c419710f2e06e09f581fa31ddfd0c006f
