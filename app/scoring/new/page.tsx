@@ -93,7 +93,7 @@ export default function NewScoring(){
     }
     const { error } = await supabase.from('evaluations').insert(payload)
     if (error) { alert('Erreur enregistrement: '+error.message); console.error(error); return }
-    alert(Évaluation enregistrée. Score=\%, Grade=\, PD=\)
+    alert('eeeeee')
   }
 
   if (loading) return <div>Chargement…</div>
