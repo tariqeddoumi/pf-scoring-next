@@ -39,11 +39,10 @@ export default function NewScoringPage() {
         (subsByCrit[row.criterion_id] ||= []).push(row)
       }
       const optsByOwner: Record<string, any[]> = {}
-      for (const row of (o.data || [])) {
-        const key = row.owner_kind + ':' + row.owner_id
-        (optsByOwner[key] ||= []).push(row)
+      for (const row of ((o.data as any[]) || [])) {
+        const ownerKey: string = String(row.owner_kind) + ':' + String(row.owner_id)
+        ;(optsByOwner[ownerKey] ||= []).push(row)
       }
-
       const ds: Domain[] = (d.data || []).map((dom: any) => ({
         id: dom.id,
         code: dom.code,
@@ -335,3 +334,4 @@ function serializeAnswers(a: Answers) {
   }
   return out
 }
+
