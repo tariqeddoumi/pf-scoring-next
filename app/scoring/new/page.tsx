@@ -1,337 +1,202 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabaseClient'
-import {
-  computeScores,
-  resolveGrade,
-  type Domain,
-  type Answers,
-  type GradeBucket
-} from '@/lib/scoring'
 
-type ProjectRow = { project_id: string; project_name: string }
+type EvalRow = {
+  eval_id: string
+  score_final: number | null
+  grade: string | null
+  pd: number | null
+  created_at: string
+  project: {
+    project_id: string
+    code_project: string | null
+    project_name: string | null
+  } | null
+  client: {
+    client_id: string
+    code_client: string | null
+    client_name: string | null
+  } | null
+}
 
-export default function NewScoringPage() {
-  const [projects, setProjects] = useState<ProjectRow[]>([])
-  const [projectId, setProjectId] = useState<string>('')
+export default function ScoringListPage() {
+  const [rows, setRows] = useState<EvalRow[]>([])
+  const [filtered, setFiltered] = useState<EvalRow[]>([])
+  const [q, setQ] = useState('')
   const [loading, setLoading] = useState(true)
-  const [domains, setDomains] = useState<Domain[]>([])
-  const [buckets, setBuckets] = useState<GradeBucket[]>([])
-  const [answers, setAnswers] = useState<Answers>({})
 
-  // charger référentiels (domaines/critères/sous-critères/options) + projets + grade_rules
-  useEffect(() => {
-    const run = async () => {
-      setLoading(true)
+  const load = async () => {
+    setLoading(true)
+    // On récupère les evals avec jointure projet & client
+    const { data, error } = await supabase
+      .from('evaluations')
+      .select(`
+        eval_id,
+        score_final,
+        grade,
+        pd,
+        created_at,
+        project:projects(
+          project_id,
+          code_project,
+          project_name
+        ),
+        client:clients(
+          client_id,
+          code_client,
+          client_name
+        )
+      `)
+      .order('created_at', { ascending: false })
+      .limit(200)
 
-      const [d, c, s, o, rules, projs] = await Promise.all([
-        supabase.from('score_domains').select('*').eq('active', true).order('order_idx'),
-        supabase.from('score_criteria').select('*').eq('active', true).order('order_idx'),
-        supabase.from('score_subcriteria').select('*').eq('active', true).order('order_idx'),
-        supabase.from('score_options').select('*').eq('active', true).order('order_idx'),
-        supabase.from('app_settings').select('value').eq('key','grade_rules').single(),
-        supabase.from('projects').select('project_id, project_name').order('created_at', { ascending: false }).limit(500)
-      ])
-
-      const subsByCrit: Record<number, any[]> = {}
-      for (const row of (s.data || [])) {
-        (subsByCrit[row.criterion_id] ||= []).push(row)
-      }
-      const optsByOwner: Record<string, any[]> = {}
-      for (const row of ((o.data as any[]) || [])) {
-        const ownerKey: string = String(row.owner_kind) + ':' + String(row.owner_id)
-        ;(optsByOwner[ownerKey] ||= []).push(row)
-      }
-      const ds: Domain[] = (d.data || []).map((dom: any) => ({
-        id: dom.id,
-        code: dom.code,
-        weight: Number(dom.weight),
-        criteria: (c.data || [])
-          .filter((cr: any) => cr.domain_id === dom.id)
-          .map((cr: any) => {
-            const sub = (subsByCrit[cr.id] || []).map((sr: any) => ({
-              id: sr.id,
-              code: sr.code,
-              weight: Number(sr.weight),
-              input_type: sr.input_type as any,
-              options: (optsByOwner['subcriterion:' + sr.id] || []).map((op: any) => ({
-                id: op.id,
-                value_label: op.value_label,
-                score: Number(op.score)
-              }))
-            }))
-            return {
-              id: cr.id,
-              code: cr.code,
-              weight: Number(cr.weight),
-              input_type: cr.input_type as any,
-              aggregation: cr.aggregation as any,
-              options: (optsByOwner['criterion:' + cr.id] || []).map((op: any) => ({
-                id: op.id,
-                value_label: op.value_label,
-                score: Number(op.score)
-              })),
-              subcriteria: sub
-            }
-          })
-      }))
-
-      setDomains(ds)
-      setBuckets(((rules.data?.value?.buckets) || []) as GradeBucket[])
-      setProjects(((projs.data || []) as ProjectRow[]))
-      setLoading(false)
+    if (!error && data) {
+      const casted = data as unknown as EvalRow[]
+      setRows(casted)
+      setFiltered(casted)
     }
-    run()
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    load()
   }, [])
 
-  const setCrit = (critId: number, v: any) => {
-    setAnswers((s) => ({ ...s, [critId]: { ...(s[critId] || {}), value: v } }))
-  }
-  const setSub = (critId: number, subId: number, v: any) => {
-    setAnswers((s) => ({
-      ...s,
-      [critId]: {
-        ...(s[critId] || {}),
-        sub: { ...((s[critId] && s[critId].sub) || {}), [subId]: { value: v } }
-      }
-    }))
-  }
-
-  const { total, domainScores } = useMemo(() => computeScores(domains, answers), [domains, answers])
-  const gradeInfo = useMemo(() => resolveGrade(total, buckets), [total, buckets])
-
-  const save = async () => {
-    if (!projectId) {
-      alert('Choisis un projet.')
+  const applyFilter = () => {
+    const term = q.trim().toLowerCase()
+    if (!term) {
+      setFiltered(rows)
       return
     }
-    const payload = {
-      project_id: projectId,
-      domain_scores: domainScores,
-      total_score: total,
-      grade: gradeInfo.grade,
-      pd: gradeInfo.pd,
-      answers: serializeAnswers(answers)
-    }
-    const { data, error } = await supabase.from('evaluations').insert(payload).select('id').single()
-    if (error) {
-      alert('Erreur enregistrement: ' + error.message)
-      console.error(error)
-      return
-    }
-
-    // Détail normalisé
-    const rows: any[] = []
-    for (const [critIdStr, aC] of Object.entries(answers)) {
-      const critId = Number(critIdStr)
-      if (aC?.value !== undefined) {
-        const val = aC.value
-        rows.push({
-          evaluation_id: data.id,
-          criterion_id: critId,
-          option_id: isFinite(Number(val)) ? Number(val) : null,
-          numeric_value: typeof val === 'number' ? val : null,
-          text_value: typeof val === 'string' ? val : null
-        })
-      }
-      if (aC?.sub) {
-        for (const [subIdStr, aS] of Object.entries(aC.sub)) {
-          const subId = Number(subIdStr)
-          const val = (aS as any)?.value
-          rows.push({
-            evaluation_id: data.id,
-            subcriterion_id: subId,
-            option_id: isFinite(Number(val)) ? Number(val) : null,
-            numeric_value: typeof val === 'number' ? val : null,
-            text_value: typeof val === 'string' ? val : null
-          })
-        }
-      }
-    }
-    if (rows.length) {
-      const { error: e2 } = await supabase.from('evaluation_answers').insert(rows)
-      if (e2) {
-        console.warn('Réponses détaillées non enregistrées:', e2.message)
-      }
-    }
-
-    alert(
-      'Évaluation enregistrée. Score=' +
-      (total * 100).toFixed(1) +
-      '%, Grade=' + gradeInfo.grade +
-      ', PD=' + gradeInfo.pd
+    setFiltered(
+      rows.filter((r) => {
+        const p = r.project
+        const c = r.client
+        return (
+          (p?.code_project || '').toLowerCase().includes(term) ||
+          (p?.project_name || '').toLowerCase().includes(term) ||
+          (c?.code_client || '').toLowerCase().includes(term) ||
+          (c?.client_name || '').toLowerCase().includes(term) ||
+          (r.grade || '').toLowerCase().includes(term)
+        )
+      })
     )
   }
 
-  if (loading) return <div className="p-6">Chargement…</div>
+  useEffect(() => {
+    applyFilter()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, rows])
 
   return (
     <div className="p-6 space-y-6">
-      <h1 className="text-xl font-semibold">Nouvelle évaluation (scoring)</h1>
-
-      {/* Choix projet */}
-      <div className="bg-white border rounded p-4">
-        <label className="block text-sm text-gray-600 mb-1">Projet</label>
-        <select
-          className="border rounded px-3 py-2 w-full"
-          value={projectId}
-          onChange={(e) => setProjectId(e.target.value)}
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-semibold">Scorings projets</h1>
+          <p className="text-xs text-gray-500">
+            Historique des notations Project Finance (grade & PD calculés à partir du modèle paramétrable).
+          </p>
+        </div>
+        <a
+          href="/scoring/new"
+          className="px-4 py-2 bg-black text-white rounded hover:bg-gray-800 text-sm"
         >
-          <option value="">— Choisir un projet —</option>
-          {projects.map((p) => (
-            <option key={p.project_id} value={p.project_id}>
-              {p.project_id} — {p.project_name}
-            </option>
-          ))}
-        </select>
+          + Nouveau scoring
+        </a>
       </div>
 
-      {/* Affichage des domaines/critères/sous-critères */}
-      {domains.map((d) => (
-        <div key={d.id} className="bg-white border rounded p-4 space-y-3">
-          <div className="font-semibold">
-            {d.code} — Poids domaine = {(d.weight * 100).toFixed(0)}%
-          </div>
-
-          {d.criteria.map((c) => {
-            const aC = answers[c.id]
-            const hasSubs = !!(c.subcriteria && c.subcriteria.length)
-            return (
-              <div key={c.id} className="border rounded p-3">
-                <div className="font-medium">
-                  {c.code} — Poids critère = {(c.weight * 100).toFixed(0)}%
-                </div>
-
-                {!hasSubs && (
-                  <div className="mt-2">
-                    {c.input_type === 'select' || c.input_type === 'yesno' ? (
-                      <select
-                        className="border rounded px-3 py-2"
-                        value={(aC && aC.value) ?? ''}
-                        onChange={(e) => setCrit(c.id, e.target.value === '' ? undefined : Number(e.target.value))}
-                      >
-                        <option value="">— Choisir —</option>
-                        {(c.options || []).map((op) => (
-                          <option key={op.id} value={op.id}>
-                            {op.value_label}
-                          </option>
-                        ))}
-                      </select>
-                    ) : c.input_type === 'number' || c.input_type === 'range' ? (
-                      <input
-                        type="number"
-                        min={0}
-                        max={1}
-                        step="0.01"
-                        className="border rounded px-3 py-2 w-40"
-                        value={(aC && typeof aC.value !== 'undefined') ? aC.value : ''}
-                        onChange={(e) => {
-                          const v = e.target.value
-                          setCrit(c.id, v === '' ? undefined : Number(v))
-                        }}
-                      />
-                    ) : (
-                      <input
-                        className="border rounded px-3 py-2 w-full"
-                        placeholder="Texte (non noté)"
-                        value={(aC && (aC as any).valueText) || ''}
-                        onChange={(e) => setCrit(c.id, e.target.value)}
-                      />
-                    )}
-                  </div>
-                )}
-
-                {hasSubs && (
-                  <div className="mt-2 space-y-2">
-                    {(c.subcriteria || []).map((s) => {
-                      const aS = aC && aC.sub && aC.sub[s.id]
-                      return (
-                        <div key={s.id} className="flex items-center gap-3">
-                          <div className="w-64 text-sm">
-                            {s.code} — Poids {(s.weight * 100).toFixed(0)}%
-                          </div>
-                          {s.input_type === 'select' || s.input_type === 'yesno' ? (
-                            <select
-                              className="border rounded px-3 py-2"
-                              value={(aS && aS.value) ?? ''}
-                              onChange={(e) =>
-                                setSub(c.id, s.id, e.target.value === '' ? undefined : Number(e.target.value))
-                              }
-                            >
-                              <option value="">— Choisir —</option>
-                              {(s.options || []).map((op) => (
-                                <option key={op.id} value={op.id}>
-                                  {op.value_label}
-                                </option>
-                              ))}
-                            </select>
-                          ) : s.input_type === 'number' || s.input_type === 'range' ? (
-                            <input
-                              type="number"
-                              min={0}
-                              max={1}
-                              step="0.01"
-                              className="border rounded px-3 py-2 w-40"
-                              value={(aS && typeof aS.value !== 'undefined') ? aS.value : ''}
-                              onChange={(e) => {
-                                const v = e.target.value
-                                setSub(c.id, s.id, v === '' ? undefined : Number(v))
-                              }}
-                            />
-                          ) : (
-                            <input
-                              className="border rounded px-3 py-2 w-full"
-                              placeholder="Texte (non noté)"
-                              value={(aS && (aS as any).valueText) || ''}
-                              onChange={(e) => setSub(c.id, s.id, e.target.value)}
-                            />
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            )
-          })}
-
-          <div className="text-sm text-gray-600">
-            Score domaine {d.code} = {(domainScores[d.code] !== undefined ? domainScores[d.code] : 0).toFixed(4)}
-          </div>
-        </div>
-      ))}
-
-      {/* Résumé et sauvegarde */}
-      <div className="bg-white border rounded p-4">
-        <div className="text-lg font-semibold">
-          Total: {(total * 100).toFixed(1)}% — Grade {gradeInfo.grade} — PD {gradeInfo.pd}
-        </div>
+      <div className="flex gap-2">
+        <input
+          className="border p-2 rounded flex-1 text-sm"
+          placeholder="Recherche par projet, client ou grade…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
         <button
-          onClick={save}
-          className="bg-black text-white px-4 py-2 rounded hover:bg-gray-800 mt-3"
+          className="px-3 py-2 border rounded text-sm"
+          onClick={applyFilter}
         >
-          Enregistrer l’évaluation
+          Filtrer
         </button>
+        <button
+          className="px-3 py-2 border rounded text-sm"
+          onClick={load}
+        >
+          Rafraîchir
+        </button>
+      </div>
+
+      <div className="bg-white border rounded overflow-auto">
+        <table className="min-w-full text-sm">
+          <thead className="bg-gray-100">
+            <tr>
+              <th className="border px-2 py-1">Date</th>
+              <th className="border px-2 py-1">Projet</th>
+              <th className="border px-2 py-1">Client</th>
+              <th className="border px-2 py-1">Score</th>
+              <th className="border px-2 py-1">Grade</th>
+              <th className="border px-2 py-1">PD</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading && (
+              <tr>
+                <td
+                  colSpan={6}
+                  className="border px-2 py-3 text-center text-gray-500"
+                >
+                  Chargement…
+                </td>
+              </tr>
+            )}
+            {!loading && filtered.length === 0 && (
+              <tr>
+                <td
+                  colSpan={6}
+                  className="border px-2 py-3 text-center text-gray-500"
+                >
+                  Aucun scoring trouvé.
+                </td>
+              </tr>
+            )}
+            {!loading &&
+              filtered.map((r) => (
+                <tr key={r.eval_id}>
+                  <td className="border px-2 py-1">
+                    {new Date(r.created_at).toLocaleString()}
+                  </td>
+                  <td className="border px-2 py-1">
+                    {r.project
+                      ? `${r.project.code_project || ''} — ${
+                          r.project.project_name || ''
+                        }`
+                      : ''}
+                  </td>
+                  <td className="border px-2 py-1">
+                    {r.client
+                      ? `${r.client.code_client || ''} — ${
+                          r.client.client_name || ''
+                        }`
+                      : ''}
+                  </td>
+                  <td className="border px-2 py-1">
+                    {r.score_final !== null
+                      ? r.score_final.toFixed(3)
+                      : ''}
+                  </td>
+                  <td className="border px-2 py-1 font-semibold">
+                    {r.grade || ''}
+                  </td>
+                  <td className="border px-2 py-1">
+                    {r.pd !== null ? (r.pd * 100).toFixed(2) + ' %' : ''}
+                  </td>
+                </tr>
+              ))}
+          </tbody>
+        </table>
       </div>
     </div>
   )
 }
-
-function serializeAnswers(a: Answers) {
-  // snapshot léger pour rechargement rapide
-  const out: any = {}
-  for (const [k, v] of Object.entries(a)) {
-    const critId = Number(k)
-    out[critId] = {}
-    if (v.value !== undefined) out[critId].value = v.value
-    if (v.sub) {
-      out[critId].sub = {}
-      for (const [sk, sv] of Object.entries(v.sub)) {
-        out[critId].sub[Number(sk)] = { value: (sv as any).value }
-      }
-    }
-  }
-  return out
-}
-
