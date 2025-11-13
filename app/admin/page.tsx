@@ -1,243 +1,157 @@
 'use client'
-
 import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabaseClient'
+import { supabase } from '@/lib/supabase'
 
-type GradeBucket = { min: number; max: number; grade: string; pd: number }
-type AppFlags = { show_intermediate_scores?: boolean }
+type Domain = { id:number; code:string; label:string; weight:number; order_idx:number; active:boolean }
+type Criterion = { id:number; domain_id:number; code:string; label:string; weight:number; order_idx:number; active:boolean }
+type SubCrit = { id:number; criterion_id:number; code:string; label:string; weight:number; order_idx:number; active:boolean }
+type Option = { id:number; owner_kind:string; owner_id:number; value_code:string; value_label:string; score:number; order_idx:number; active:boolean }
 
-export default function AdminPage() {
+export default function AdminPage(){
+  const [domains, setDomains] = useState<Domain[]>([])
+  const [criteria, setCriteria] = useState<Criterion[]>([])
+  const [subs, setSubs] = useState<SubCrit[]>([])
+  const [options, setOptions] = useState<Option[]>([])
   const [loading, setLoading] = useState(true)
-  const [flags, setFlags] = useState<AppFlags>({ show_intermediate_scores: false })
-  const [buckets, setBuckets] = useState<GradeBucket[]>([]) // <-- pas de valeurs en dur
 
-  useEffect(() => {
-    const run = async () => {
-      setLoading(true)
-
-      // Flags
-      const af = await supabase
-        .from('app_settings')
-        .select('value')
-        .eq('key', 'app_flags')
-        .single()
-
-      if (!af.error && af.data?.value) {
-        setFlags({
-          show_intermediate_scores: !!af.data.value.show_intermediate_scores,
-        })
-      }
-
-      // Grade rules
-      const gr = await supabase
-        .from('app_settings')
-        .select('value')
-        .eq('key', 'grade_rules')
-        .single()
-
-      if (!gr.error && gr.data?.value?.buckets) {
-        setBuckets(gr.data.value.buckets as GradeBucket[])
-      } else {
-        // rien en base -> on laisse vide (100% DB-driven)
-        setBuckets([])
-      }
-
-      setLoading(false)
-    }
-    run()
-  }, [])
-
-  const saveFlags = async () => {
-    const { error } = await supabase
-      .from('app_settings')
-      .upsert({ key: 'app_flags', value: flags })
-    if (error) return alert('Erreur paramètres: ' + error.message)
-    alert('Paramètres enregistrés ✅')
+  const refresh = async ()=>{
+    setLoading(true)
+    const [d, c, s, o] = await Promise.all([
+      supabase.from('score_domains').select('*').order('order_idx'),
+      supabase.from('score_criteria').select('*').order('order_idx'),
+      supabase.from('score_subcriteria').select('*').order('order_idx'),
+      supabase.from('score_options').select('*').order('order_idx')
+    ])
+    setDomains(d.data || [])
+    setCriteria(c.data || [])
+    setSubs(s.data || [])
+    setOptions(o.data || [])
+    setLoading(false)
   }
 
-  const saveBuckets = async () => {
-    // validations simples
-    for (const b of buckets) {
-      if (!(b.min >= 0 && b.max <= 1 && b.min < b.max)) {
-        return alert('Chaque bucket: 0 ≤ min < max ≤ 1')
-      }
-      if (!b.grade?.trim()) return alert('Grade manquant')
-      if (!(b.pd >= 0)) return alert('PD ≥ 0')
-    }
-    const { error } = await supabase
-      .from('app_settings')
-      .upsert({ key: 'grade_rules', value: { buckets } })
-    if (error) return alert('Erreur grade_rules: ' + error.message)
-    alert('Règles de grading enregistrées ✅')
+  useEffect(()=>{ refresh() },[])
+
+  const updateRow = async (table:string, idKey:string, row:any)=>{
+    const { error } = await supabase.from(table).update(row).eq(idKey, row[idKey]).select().single()
+    if (error) alert(error.message)
   }
 
-  const setBucket = (i: number, k: keyof GradeBucket, v: string) => {
-    const next = [...buckets]
-    if (k === 'grade') next[i].grade = v
-    else next[i][k] = Number(v) as any
-    setBuckets(next)
-  }
-
-  const addBucket = () =>
-    setBuckets((b) => [...b, { min: 0.0, max: 1.0, grade: '', pd: 0 }])
-
-  const removeBucket = (i: number) =>
-    setBuckets((b) => b.filter((_, idx) => idx !== i))
-
-  const sortBuckets = () =>
-    setBuckets((b) => [...b].sort((x, y) => x.min - y.min))
-
-  // (Optionnel) bouton pour créer un modèle par défaut EN BASE,
-  // utile uniquement si tu veux “amorcer” rapidement :
-  const writeDefaultBuckets = async () => {
-    const defaults: GradeBucket[] = [
-      { min: 0.85, max: 1.0, grade: 'A', pd: 0.002 },
-      { min: 0.75, max: 0.85, grade: 'B', pd: 0.004 },
-      { min: 0.65, max: 0.75, grade: 'C', pd: 0.01 },
-      { min: 0.55, max: 0.65, grade: 'D', pd: 0.02 },
-      { min: 0.0,  max: 0.55, grade: 'E', pd: 0.05 },
-    ]
-    const { error } = await supabase
-      .from('app_settings')
-      .upsert({ key: 'grade_rules', value: { buckets: defaults } })
-    if (error) return alert('Erreur: ' + error.message)
-    setBuckets(defaults)
-    alert('Modèle par défaut chargé en base ✅')
-  }
-
-  if (loading) return <div className="p-6">Chargement…</div>
+  if (loading) return <div>Chargement…</div>
 
   return (
-    <div className="p-6 space-y-8">
-      <h1 className="text-xl font-semibold">Administration</h1>
+    <div className="space-y-8">
+      <h1 className="text-xl font-semibold">Paramétrage de scoring</h1>
 
-      {/* === Paramètres d’application === */}
-      <section className="bg-white border rounded p-4 space-y-3">
-        <h2 className="font-semibold">Paramètres d’application</h2>
-        <label className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={!!flags.show_intermediate_scores}
-            onChange={(e) =>
-              setFlags((f) => ({ ...f, show_intermediate_scores: e.target.checked }))
-            }
-          />
-          <span>Afficher les scores intermédiaires aux non-admins</span>
-        </label>
-        <button
-          onClick={saveFlags}
-          className="bg-black text-white px-4 py-2 rounded hover:bg-gray-800"
-        >
-          Enregistrer
-        </button>
-      </section>
-
-      {/* === Règles de grading === */}
-      <section className="bg-white border rounded p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="font-semibold">Règles de grading (buckets)</h2>
-          {buckets.length === 0 && (
-            <button
-              onClick={writeDefaultBuckets}
-              className="px-3 py-2 rounded border"
-              title="Option facultative pour amorcer"
-            >
-              Charger un modèle par défaut
-            </button>
-          )}
-        </div>
-
-        <div className="overflow-auto">
-          <table className="min-w-full border text-sm">
-            <thead className="bg-gray-100">
-              <tr>
-                <th className="border px-2 py-1">Min</th>
-                <th className="border px-2 py-1">Max</th>
-                <th className="border px-2 py-1">Grade</th>
-                <th className="border px-2 py-1">PD</th>
-                <th className="border px-2 py-1">Actions</th>
+      {/* Domains */}
+      <section className="bg-white p-3 border rounded">
+        <h2 className="font-semibold mb-2">Domains</h2>
+        <table className="w-full text-sm border">
+          <thead className="bg-gray-100">
+            <tr>
+              <th className="p-2">ID</th><th className="p-2">Code</th><th className="p-2">Label</th><th className="p-2">Weight</th><th className="p-2">Order</th><th className="p-2">Actif</th><th className="p-2">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {domains.map(d=>(
+              <tr key={d.id} className="border-t">
+                <td className="p-2">{d.id}</td>
+                <td className="p-2"><input className="border p-1 rounded w-32" defaultValue={d.code} onBlur={e=>updateRow('score_domains','id',{...d, code:e.target.value})}/></td>
+                <td className="p-2"><input className="border p-1 rounded w-full" defaultValue={d.label} onBlur={e=>updateRow('score_domains','id',{...d, label:e.target.value})}/></td>
+                <td className="p-2"><input className="border p-1 rounded w-20" type="number" step="0.0001" defaultValue={d.weight} onBlur={e=>updateRow('score_domains','id',{...d, weight:Number(e.target.value)})}/></td>
+                <td className="p-2"><input className="border p-1 rounded w-16" type="number" defaultValue={d.order_idx} onBlur={e=>updateRow('score_domains','id',{...d, order_idx:Number(e.target.value)})}/></td>
+                <td className="p-2 text-center">
+                  <input type="checkbox" defaultChecked={d.active} onChange={e=>updateRow('score_domains','id',{...d, active:e.target.checked})}/>
+                </td>
+                <td className="p-2 text-right text-gray-400">auto-save</td>
               </tr>
-            </thead>
-            <tbody>
-              {buckets.map((b, i) => (
-                <tr key={i}>
-                  <td className="border px-2 py-1">
-                    <input
-                      className="border rounded px-2 py-1 w-24"
-                      type="number"
-                      step="0.01"
-                      min={0}
-                      max={1}
-                      value={b.min}
-                      onChange={(e) => setBucket(i, 'min', e.target.value)}
-                    />
-                  </td>
-                  <td className="border px-2 py-1">
-                    <input
-                      className="border rounded px-2 py-1 w-24"
-                      type="number"
-                      step="0.01"
-                      min={0}
-                      max={1}
-                      value={b.max}
-                      onChange={(e) => setBucket(i, 'max', e.target.value)}
-                    />
-                  </td>
-                  <td className="border px-2 py-1">
-                    <input
-                      className="border rounded px-2 py-1 w-20"
-                      value={b.grade}
-                      onChange={(e) => setBucket(i, 'grade', e.target.value)}
-                    />
-                  </td>
-                  <td className="border px-2 py-1">
-                    <input
-                      className="border rounded px-2 py-1 w-28"
-                      type="number"
-                      step="0.0001"
-                      min={0}
-                      value={b.pd}
-                      onChange={(e) => setBucket(i, 'pd', e.target.value)}
-                    />
-                  </td>
-                  <td className="border px-2 py-1">
-                    <div className="flex gap-2">
-                      <button onClick={() => removeBucket(i)} className="px-2 py-1 rounded border">
-                        Supprimer
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {buckets.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="border px-2 py-3 text-center text-gray-500">
-                    Aucun bucket défini. Ajoute des lignes ou utilise “Charger un modèle par défaut”.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="flex gap-2">
-          <button onClick={addBucket} className="px-3 py-2 rounded border">Ajouter un bucket</button>
-          <button onClick={sortBuckets} className="px-3 py-2 rounded border">Trier par min</button>
-          <button
-            onClick={saveBuckets}
-            className="bg-black text-white px-4 py-2 rounded hover:bg-gray-800"
-          >
-            Enregistrer les règles
-          </button>
-        </div>
+            ))}
+          </tbody>
+        </table>
       </section>
 
-      <section className="bg-white border rounded p-4">
-        <h2 className="font-semibold">Gestion du modèle (paramétrage)</h2>
-        <p className="text-sm text-gray-600">
-          Le scoring lit directement <code>score_domains</code>, <code>score_criteria</code>, <code>score_subcriteria</code>, <code>score_options</code> et <code>app_settings</code>.
-          Aucun paramètre n’est en dur. Tu peux ajouter une page dédiée (ex. <code>/admin/scoring</code>) pour le CRUD complet si tu veux administrer ces quatre tables via l’UI.
-        </p>
+      {/* Criteria */}
+      <section className="bg-white p-3 border rounded">
+        <h2 className="font-semibold mb-2">Criteria</h2>
+        <table className="w-full text-sm border">
+          <thead className="bg-gray-100">
+            <tr>
+              <th className="p-2">ID</th><th className="p-2">Domain</th><th className="p-2">Code</th><th className="p-2">Label</th><th className="p-2">Weight</th><th className="p-2">Order</th><th className="p-2">Actif</th><th className="p-2">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {criteria.map(c=>(
+              <tr key={c.id} className="border-t">
+                <td className="p-2">{c.id}</td>
+                <td className="p-2">{c.domain_id}</td>
+                <td className="p-2"><input className="border p-1 rounded w-28" defaultValue={c.code} onBlur={e=>updateRow('score_criteria','id',{...c, code:e.target.value})}/></td>
+                <td className="p-2"><input className="border p-1 rounded w-full" defaultValue={c.label} onBlur={e=>updateRow('score_criteria','id',{...c, label:e.target.value})}/></td>
+                <td className="p-2"><input className="border p-1 rounded w-20" type="number" step="0.0001" defaultValue={c.weight} onBlur={e=>updateRow('score_criteria','id',{...c, weight:Number(e.target.value)})}/></td>
+                <td className="p-2"><input className="border p-1 rounded w-16" type="number" defaultValue={c.order_idx} onBlur={e=>updateRow('score_criteria','id',{...c, order_idx:Number(e.target.value)})}/></td>
+                <td className="p-2 text-center">
+                  <input type="checkbox" defaultChecked={c.active} onChange={e=>updateRow('score_criteria','id',{...c, active:e.target.checked})}/>
+                </td>
+                <td className="p-2 text-right text-gray-400">auto-save</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+
+      {/* Subcriteria */}
+      <section className="bg-white p-3 border rounded">
+        <h2 className="font-semibold mb-2">Subcriteria</h2>
+        <table className="w-full text-sm border">
+          <thead className="bg-gray-100">
+            <tr>
+              <th className="p-2">ID</th><th className="p-2">Criterion</th><th className="p-2">Code</th><th className="p-2">Label</th><th className="p-2">Weight</th><th className="p-2">Order</th><th className="p-2">Actif</th><th className="p-2">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {subs.map(s=>(
+              <tr key={s.id} className="border-t">
+                <td className="p-2">{s.id}</td>
+                <td className="p-2">{s.criterion_id}</td>
+                <td className="p-2"><input className="border p-1 rounded w-28" defaultValue={s.code} onBlur={e=>updateRow('score_subcriteria','id',{...s, code:e.target.value})}/></td>
+                <td className="p-2"><input className="border p-1 rounded w-full" defaultValue={s.label} onBlur={e=>updateRow('score_subcriteria','id',{...s, label:e.target.value})}/></td>
+                <td className="p-2"><input className="border p-1 rounded w-20" type="number" step="0.0001" defaultValue={s.weight} onBlur={e=>updateRow('score_subcriteria','id',{...s, weight:Number(e.target.value)})}/></td>
+                <td className="p-2"><input className="border p-1 rounded w-16" type="number" defaultValue={s.order_idx} onBlur={e=>updateRow('score_subcriteria','id',{...s, order_idx:Number(e.target.value)})}/></td>
+                <td className="p-2 text-center">
+                  <input type="checkbox" defaultChecked={s.active} onChange={e=>updateRow('score_subcriteria','id',{...s, active:e.target.checked})}/>
+                </td>
+                <td className="p-2 text-right text-gray-400">auto-save</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+
+      {/* Options */}
+      <section className="bg-white p-3 border rounded">
+        <h2 className="font-semibold mb-2">Options</h2>
+        <table className="w-full text-sm border">
+          <thead className="bg-gray-100">
+            <tr>
+              <th className="p-2">ID</th><th className="p-2">Owner</th><th className="p-2">Code</th><th className="p-2">Label</th><th className="p-2">Score</th><th className="p-2">Order</th><th className="p-2">Actif</th><th className="p-2">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {options.slice(0,400).map(o=>(
+              <tr key={o.id} className="border-t">
+                <td className="p-2">{o.id}</td>
+                <td className="p-2">{o.owner_kind}:{o.owner_id}</td>
+                <td className="p-2"><input className="border p-1 rounded w-16" defaultValue={o.value_code} onBlur={e=>updateRow('score_options','id',{...o, value_code:e.target.value})}/></td>
+                <td className="p-2"><input className="border p-1 rounded w-full" defaultValue={o.value_label} onBlur={e=>updateRow('score_options','id',{...o, value_label:e.target.value})}/></td>
+                <td className="p-2"><input className="border p-1 rounded w-20" type="number" step="0.0001" defaultValue={o.score} onBlur={e=>updateRow('score_options','id',{...o, score:Number(e.target.value)})}/></td>
+                <td className="p-2"><input className="border p-1 rounded w-16" type="number" defaultValue={o.order_idx} onBlur={e=>updateRow('score_options','id',{...o, order_idx:Number(e.target.value)})}/></td>
+                <td className="p-2 text-center">
+                  <input type="checkbox" defaultChecked={o.active} onChange={e=>updateRow('score_options','id',{...o, active:e.target.checked})}/>
+                </td>
+                <td className="p-2 text-right text-gray-400">auto-save</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="text-xs text-gray-500 mt-2">Astuce : filtre/pagination à ajouter si nécessaire (la table peut être volumineuse).</p>
       </section>
     </div>
   )
