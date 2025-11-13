@@ -1,202 +1,136 @@
 'use client'
+import { useEffect, useMemo, useState } from 'react'
+import { supabase } from '@/lib/supabase'
 
-import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabaseClient'
+type Project = { project_id: string; code_project: string; project_name: string }
+type Domain = { id:number; code:string; label:string; weight:number; order_idx:number }
+type Criterion = { id:number; domain_id:number; code:string; label:string; weight:number; order_idx:number }
+type SubCrit = { id:number; criterion_id:number; code:string; label:string; weight:number; order_idx:number }
+type Option = { id:number; owner_kind:string; owner_id:number; value_code:string; value_label:string; score:number; order_idx:number }
 
-type EvalRow = {
-  eval_id: string
-  score_final: number | null
-  grade: string | null
-  pd: number | null
-  created_at: string
-  project: {
-    project_id: string
-    code_project: string | null
-    project_name: string | null
-  } | null
-  client: {
-    client_id: string
-    code_client: string | null
-    client_name: string | null
-  } | null
-}
-
-export default function ScoringListPage() {
-  const [rows, setRows] = useState<EvalRow[]>([])
-  const [filtered, setFiltered] = useState<EvalRow[]>([])
-  const [q, setQ] = useState('')
+export default function NewScoringPage(){
+  const [projects, setProjects] = useState<Project[]>([])
+  const [projectId, setProjectId] = useState<string>('')
+  const [domains, setDomains] = useState<Domain[]>([])
+  const [criteria, setCriteria] = useState<Criterion[]>([])
+  const [subs, setSubs] = useState<SubCrit[]>([])
+  const [optsByOwner, setOptsByOwner] = useState<Record<number, Option[]>>({})
+  const [answers, setAnswers] = useState<Record<string,string>>({})
   const [loading, setLoading] = useState(true)
 
-  const load = async () => {
-    setLoading(true)
-    // On récupère les evals avec jointure projet & client
-    const { data, error } = await supabase
-      .from('evaluations')
-      .select(`
-        eval_id,
-        score_final,
-        grade,
-        pd,
-        created_at,
-        project:projects(
-          project_id,
-          code_project,
-          project_name
-        ),
-        client:clients(
-          client_id,
-          code_client,
-          client_name
-        )
-      `)
-      .order('created_at', { ascending: false })
-      .limit(200)
+  useEffect(()=>{
+    (async ()=>{
+      const [p, d, c, s, o] = await Promise.all([
+        supabase.from('projects').select('project_id, code_project, project_name').order('updated_at',{ascending:false}).limit(200),
+        supabase.from('score_domains').select('*').eq('active', true).order('order_idx'),
+        supabase.from('score_criteria').select('*').eq('active', true).order('order_idx'),
+        supabase.from('score_subcriteria').select('*').eq('active', true).order('order_idx'),
+        supabase.from('score_options').select('*').eq('active', true).order('order_idx')
+      ])
+      setProjects(p.data || [])
+      setDomains(d.data || [])
+      setCriteria(c.data || [])
+      setSubs(s.data || [])
 
-    if (!error && data) {
-      const casted = data as unknown as EvalRow[]
-      setRows(casted)
-      setFiltered(casted)
-    }
-    setLoading(false)
+      const byOwner: Record<number, Option[]> = {}
+      for (const row of (o.data || [])) {
+        if (row.owner_kind === 'subcriterion') {
+          (byOwner[row.owner_id] ||= []).push(row as any)
+        }
+      }
+      setOptsByOwner(byOwner)
+      setLoading(false)
+    })()
+  },[])
+
+  const onSelect = (code:string, val:string)=>{
+    setAnswers(a=>({ ...a, [code]: val }))
   }
 
-  useEffect(() => {
-    load()
-  }, [])
+  const grouped = useMemo(()=>{
+    const critByDomain: Record<number, Criterion[]> = {}
+    criteria.forEach(c=>{ (critByDomain[c.domain_id] ||= []).push(c) })
+    const subByCrit: Record<number, SubCrit[]> = {}
+    subs.forEach(s=>{ (subByCrit[s.criterion_id] ||= []).push(s) })
+    return { critByDomain, subByCrit }
+  },[criteria, subs])
 
-  const applyFilter = () => {
-    const term = q.trim().toLowerCase()
-    if (!term) {
-      setFiltered(rows)
-      return
+  const save = async ()=>{
+    if (!projectId) { alert('Choisis un projet.'); return }
+
+    // Calcul SQL via RPC
+    const { data: scoreRows, error } = await supabase.rpc('compute_project_score', {
+      p_project: projectId,
+      p_answers: answers as any
+    })
+    if (error) { alert(error.message); return }
+
+    // agrégation grade/pd
+    let finalScore = 0, grade='N/A', pd: number | null = null
+    if (scoreRows && scoreRows.length) {
+      const last = scoreRows[scoreRows.length-1]
+      finalScore = Number(last.score_final ?? 0)
+      grade = last.grade ?? 'N/A'
+      pd = last.pd ?? null
     }
-    setFiltered(
-      rows.filter((r) => {
-        const p = r.project
-        const c = r.client
-        return (
-          (p?.code_project || '').toLowerCase().includes(term) ||
-          (p?.project_name || '').toLowerCase().includes(term) ||
-          (c?.code_client || '').toLowerCase().includes(term) ||
-          (c?.client_name || '').toLowerCase().includes(term) ||
-          (r.grade || '').toLowerCase().includes(term)
-        )
-      })
-    )
+
+    const { error: insErr } = await supabase.from('evaluations').insert({
+      project_id: projectId,
+      score_final: finalScore,
+      grade,
+      pd,
+      answers,
+      breakdown: scoreRows
+    })
+    if (insErr) { alert('Erreur enregistrement: '+insErr.message); return }
+    alert(`Évaluation enregistrée. Score=${finalScore.toFixed(2)}, Grade=${grade}, PD=${pd ?? ''}`)
+    setAnswers({})
   }
 
-  useEffect(() => {
-    applyFilter()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, rows])
+  if (loading) return <div>Chargement…</div>
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold">Scorings projets</h1>
-          <p className="text-xs text-gray-500">
-            Historique des notations Project Finance (grade & PD calculés à partir du modèle paramétrable).
-          </p>
+    <div className="space-y-6">
+      <h1 className="text-xl font-semibold">Nouvelle évaluation</h1>
+
+      <div className="bg-white p-3 rounded border space-y-2">
+        <label className="block text-sm text-gray-600">Projet</label>
+        <select className="border p-2 rounded w-full" value={projectId} onChange={e=>setProjectId(e.target.value)}>
+          <option value="">— Choisir —</option>
+          {projects.map(p=>(<option key={p.project_id} value={p.project_id}>{p.project_name} ({p.code_project})</option>))}
+        </select>
+      </div>
+
+      {domains.map(d=>(
+        <div key={d.id} className="bg-white p-3 rounded border space-y-3">
+          <h2 className="font-semibold">{d.label} <span className="text-xs text-gray-500">(poids {d.weight})</span></h2>
+          {(grouped.critByDomain[d.id] || []).map(c=>(
+            <div key={c.id} className="border rounded p-3">
+              <div className="font-medium mb-2">{c.label} <span className="text-xs text-gray-500">(poids {c.weight})</span></div>
+              {(grouped.subByCrit[c.id] || []).map(sc=>{
+                const options = optsByOwner[sc.id] || []
+                return (
+                  <div key={sc.id} className="flex items-center gap-2 py-1">
+                    <div className="w-1/2">{sc.label} <span className="text-xs text-gray-400">(poids {sc.weight})</span></div>
+                    <select
+                      className="border p-2 rounded flex-1"
+                      value={answers[sc.code] || ''}
+                      onChange={e=>onSelect(sc.code, e.target.value)}
+                    >
+                      <option value="">— sélectionner —</option>
+                      {options.map(o=>(
+                        <option key={o.id} value={o.value_code}>{o.value_code} — {o.value_label}</option>
+                      ))}
+                    </select>
+                  </div>
+                )
+              })}
+            </div>
+          ))}
         </div>
-        <a
-          href="/scoring/new"
-          className="px-4 py-2 bg-black text-white rounded hover:bg-gray-800 text-sm"
-        >
-          + Nouveau scoring
-        </a>
-      </div>
+      ))}
 
-      <div className="flex gap-2">
-        <input
-          className="border p-2 rounded flex-1 text-sm"
-          placeholder="Recherche par projet, client ou grade…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
-        <button
-          className="px-3 py-2 border rounded text-sm"
-          onClick={applyFilter}
-        >
-          Filtrer
-        </button>
-        <button
-          className="px-3 py-2 border rounded text-sm"
-          onClick={load}
-        >
-          Rafraîchir
-        </button>
-      </div>
-
-      <div className="bg-white border rounded overflow-auto">
-        <table className="min-w-full text-sm">
-          <thead className="bg-gray-100">
-            <tr>
-              <th className="border px-2 py-1">Date</th>
-              <th className="border px-2 py-1">Projet</th>
-              <th className="border px-2 py-1">Client</th>
-              <th className="border px-2 py-1">Score</th>
-              <th className="border px-2 py-1">Grade</th>
-              <th className="border px-2 py-1">PD</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && (
-              <tr>
-                <td
-                  colSpan={6}
-                  className="border px-2 py-3 text-center text-gray-500"
-                >
-                  Chargement…
-                </td>
-              </tr>
-            )}
-            {!loading && filtered.length === 0 && (
-              <tr>
-                <td
-                  colSpan={6}
-                  className="border px-2 py-3 text-center text-gray-500"
-                >
-                  Aucun scoring trouvé.
-                </td>
-              </tr>
-            )}
-            {!loading &&
-              filtered.map((r) => (
-                <tr key={r.eval_id}>
-                  <td className="border px-2 py-1">
-                    {new Date(r.created_at).toLocaleString()}
-                  </td>
-                  <td className="border px-2 py-1">
-                    {r.project
-                      ? `${r.project.code_project || ''} — ${
-                          r.project.project_name || ''
-                        }`
-                      : ''}
-                  </td>
-                  <td className="border px-2 py-1">
-                    {r.client
-                      ? `${r.client.code_client || ''} — ${
-                          r.client.client_name || ''
-                        }`
-                      : ''}
-                  </td>
-                  <td className="border px-2 py-1">
-                    {r.score_final !== null
-                      ? r.score_final.toFixed(3)
-                      : ''}
-                  </td>
-                  <td className="border px-2 py-1 font-semibold">
-                    {r.grade || ''}
-                  </td>
-                  <td className="border px-2 py-1">
-                    {r.pd !== null ? (r.pd * 100).toFixed(2) + ' %' : ''}
-                  </td>
-                </tr>
-              ))}
-          </tbody>
-        </table>
-      </div>
+      <button onClick={save} className="px-4 py-2 rounded bg-green-600 text-white">Enregistrer & Calculer</button>
     </div>
   )
 }
