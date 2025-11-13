@@ -1,18 +1,18 @@
-﻿import "./globals.css"
-import Nav from "@/components/Nav"
-import type { Metadata } from "next"
+import './globals.css'
+import Nav from '@/components/Nav'
+import type { ReactNode } from 'react'
 
-export const metadata: Metadata = {
-  title: "PF Scoring",
-  description: "Project Finance Scoring — Next.js + Supabase",
+export const metadata = {
+  title: 'PF Scoring v1.2',
+  description: 'Project Finance Scoring – Next.js + Supabase'
 }
 
-export default function RootLayout({ children }: { children: React.ReactNode }){
+export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="fr">
-      <body>
+      <body className="bg-gray-50 text-gray-900">
         <Nav />
-        <main className="max-w-5xl mx-auto p-4">{children}</main>
+        <main className="max-w-6xl mx-auto p-4">{children}</main>
       </body>
     </html>
   )
